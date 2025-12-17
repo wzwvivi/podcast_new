@@ -1,0 +1,16 @@
+venv/
+venv_podcast/
+__pycache__/
+*.pyc
+*.log
+*.db
+data/
+temp_files/
+.env
+.DS_Store
+frontend/node_modules/
+frontend/dist/
+virtualenv.pyz
+
+backend.py
+backend.py

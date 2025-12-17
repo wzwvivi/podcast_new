@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+requests
+pydub
+groq
+jinja2
+python-jose[cryptography]
+passlib[bcrypt]
+sqlalchemy
+python-dateutil
