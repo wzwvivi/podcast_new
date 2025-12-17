@@ -87,7 +87,7 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
 
     const handleAddPodcaster = async () => {
         if (!formData.name || !formData.xiaoyuzhouId) {
-            alert('请填写播主名称和小宇宙ID');
+            alert('Please fill in podcaster name and Xiaoyuzhou ID');
             return;
         }
         try {
@@ -97,7 +97,7 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
             setShowAddForm(false);
             await loadPodcasters();
         } catch (e: any) {
-            alert(e.message || '添加播主失败');
+            alert(e.message || 'Failed to add podcaster');
         } finally {
             setIsLoading(false);
         }
@@ -110,14 +110,14 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
             await loadEpisodes(podcasterId);
             alert(result.message);
         } catch (e: any) {
-            alert(e.message || '刷新失败');
+            alert(e.message || 'Failed to refresh');
         } finally {
             setIsRefreshing(false);
         }
     };
 
     const handleDelete = async (podcasterId: number) => {
-        if (!confirm('确定要删除这个播主吗？')) return;
+        if (!confirm('Are you sure you want to delete this podcaster?')) return;
         try {
             await deletePodcaster(podcasterId);
             if (selectedPodcaster?.id === podcasterId) {
@@ -126,7 +126,7 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
             }
             await loadPodcasters();
         } catch (e: any) {
-            alert(e.message || '删除失败');
+            alert(e.message || 'Failed to delete');
         }
     };
 
@@ -135,13 +135,13 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
             {/* Header */}
             <div className="p-4 border-b border-dark-border">
                 <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-bold text-white">小宇宙播主</h2>
+                    <h2 className="text-lg font-bold text-white">小宇宙</h2>
                     <button
                         onClick={() => setShowAddForm(!showAddForm)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm transition-colors"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-brand-900/30 border border-brand-700/50 text-brand-300 rounded-lg text-xs font-medium uppercase tracking-wider transition-all duration-200 hover:bg-brand-900/40 hover:border-brand-600/50"
                     >
-                        <PlusIcon className="w-4 h-4" />
-                        <span>添加播主</span>
+                        <PlusIcon className="w-3 h-3" />
+                        <span>Add Podcaster</span>
                     </button>
                 </div>
 
@@ -150,14 +150,14 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
                     <div className="mt-3 p-3 bg-zinc-900 rounded-lg border border-zinc-800">
                         <input
                             type="text"
-                            placeholder="播主名称"
+                            placeholder="Podcaster Name"
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             className="w-full mb-2 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white text-sm placeholder-gray-500"
                         />
                         <input
                             type="text"
-                            placeholder="小宇宙ID或URL"
+                            placeholder="小宇宙ID or URL"
                             value={formData.xiaoyuzhouId}
                             onChange={(e) => setFormData({ ...formData, xiaoyuzhouId: e.target.value })}
                             className="w-full mb-2 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-white text-sm placeholder-gray-500"
@@ -166,18 +166,18 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
                             <button
                                 onClick={handleAddPodcaster}
                                 disabled={isLoading}
-                                className="flex-1 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded text-sm disabled:opacity-50"
+                                className="flex-1 px-3 py-1.5 bg-brand-900/30 border border-brand-700/50 text-brand-300 rounded text-xs font-medium uppercase tracking-wider disabled:opacity-50 transition-all duration-200 hover:bg-brand-900/40 hover:border-brand-600/50"
                             >
-                                {isLoading ? '添加中...' : '添加'}
+                                {isLoading ? 'Adding...' : 'Add'}
                             </button>
                             <button
                                 onClick={() => {
                                     setShowAddForm(false);
                                     setFormData({ name: '', xiaoyuzhouId: '' });
                                 }}
-                                className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-white rounded text-sm"
+                                className="px-3 py-1.5 bg-zinc-900/30 border border-zinc-700/50 text-zinc-300 rounded text-xs font-medium uppercase tracking-wider transition-all duration-200 hover:bg-zinc-900/40 hover:border-zinc-600/50"
                             >
-                                取消
+                                Cancel
                             </button>
                         </div>
                     </div>
@@ -188,8 +188,8 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
             <div className="flex-1 overflow-y-auto p-2">
                 {podcasters.length === 0 && !showAddForm && (
                     <div className="text-center mt-10 px-4">
-                        <p className="text-sm text-gray-500">还没有添加播主</p>
-                        <p className="text-xs text-zinc-600 mt-1">点击上方按钮添加你喜爱的小宇宙播主</p>
+                        <p className="text-sm text-gray-500">No podcasters added yet</p>
+                        <p className="text-xs text-zinc-600 mt-1">Click the button above to add your favorite Xiaoyuzhou podcasters</p>
                     </div>
                 )}
 
@@ -207,7 +207,7 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
                             <div className="flex-1 min-w-0">
                                 <h3 className="text-sm font-medium text-white truncate">{podcaster.name}</h3>
                                 <p className="text-xs text-gray-500 mt-1">
-                                    {podcaster.episode_count} 个单集
+                                    {podcaster.episode_count} episodes
                                 </p>
                             </div>
                             <div className="flex gap-1 ml-2">
@@ -218,7 +218,7 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
                                     }}
                                     disabled={isRefreshing}
                                     className="p-1 text-gray-500 hover:text-brand-500 transition-colors"
-                                    title="刷新"
+                                    title="Refresh"
                                 >
                                     <RefreshIcon className="w-4 h-4" />
                                 </button>
@@ -228,7 +228,7 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
                                         handleDelete(podcaster.id);
                                     }}
                                     className="p-1 text-gray-500 hover:text-red-500 transition-colors"
-                                    title="删除"
+                                    title="Delete"
                                 >
                                     <XIcon className="w-4 h-4" />
                                 </button>
@@ -259,17 +259,17 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
                     
                     <div className="p-3 border-b border-dark-border pt-4">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-bold text-white">{selectedPodcaster.name} 的单集</h3>
+                            <h3 className="text-sm font-bold text-white">{selectedPodcaster.name} Episodes</h3>
                             <div className="flex items-center gap-2 text-xs text-gray-500">
-                                <span>拖拽上方调整大小</span>
+                                <span>Drag to resize</span>
                             </div>
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-2">
                         {isLoading ? (
-                            <div className="text-center py-4 text-gray-500 text-sm">加载中...</div>
+                            <div className="text-center py-4 text-gray-500 text-sm">Loading...</div>
                         ) : episodes.length === 0 ? (
-                            <div className="text-center py-4 text-gray-500 text-sm">暂无单集</div>
+                            <div className="text-center py-4 text-gray-500 text-sm">No episodes</div>
                         ) : (
                             episodes.map((episode) => (
                                 <div
@@ -291,11 +291,11 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
                                                 <p className="text-xs text-gray-500 mt-1 line-clamp-2">{episode.description}</p>
                                             )}
                                             <div className="flex items-center gap-2 mt-2">
-                                                {episode.duration && (
+                                                {episode.duration && episode.duration > 0 ? (
                                                     <span className="text-xs text-gray-600">
-                                                        {Math.floor(episode.duration / 60)}分钟
+                                                        {Math.floor(episode.duration / 60)}分钟{episode.duration % 60 > 0 ? `${episode.duration % 60}秒` : ''}
                                                     </span>
-                                                )}
+                                                ) : null}
                                                 {episode.publish_time && (
                                                     <span className="text-xs text-gray-600">
                                                         {new Date(episode.publish_time).toLocaleDateString()}
@@ -309,7 +309,7 @@ const PodcasterManager: React.FC<PodcasterManagerProps> = ({ onEpisodeSelect }) 
                                                 onEpisodeSelect(episode.audio_url);
                                             }}
                                             className="p-2 text-brand-500 hover:text-brand-400 transition-colors"
-                                            title="分析"
+                                            title="Analyze"
                                         >
                                             <PlayIcon className="w-5 h-5" />
                                         </button>

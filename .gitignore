@@ -11,6 +11,5 @@ temp_files/
 frontend/node_modules/
 frontend/dist/
 virtualenv.pyz
-
-backend.py
-backend.py
+static/audio/
+podcast.db

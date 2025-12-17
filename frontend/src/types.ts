@@ -63,6 +63,7 @@ export interface PodcastAnalysisResult {
     actionableAdvice: string[];
     criticalReview: string;
     transcript: string;
+    local_audio_path?: string;
 }
 
 export interface ChatMessage {
@@ -76,6 +77,7 @@ export interface HistoryItem {
     title: string;
     date: number;
     result: PodcastAnalysisResult;
+    audio_url?: string | null;
 }
 
 // Custom interface for our backend-powered chat, replacing Google's Chat type

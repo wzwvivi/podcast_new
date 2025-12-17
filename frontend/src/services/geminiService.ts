@@ -1,5 +1,4 @@
 import { PodcastAnalysisResult, HistoryItem, Podcaster, Episode } from "../types";
-import { SYSTEM_INSTRUCTION_CHAT } from "../constants";
 
 const API_BASE_URL = ""; 
 
@@ -14,14 +13,15 @@ export const setLogoutCallback = (callback: () => void) => {
     logoutCallback = callback;
 };
 
-const getAuthHeaders = () => {
+const getAuthHeaders = (): Record<string, string> => {
     const token = localStorage.getItem('token');
-    return token ? { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json' // Important for JSON body
-    } : {
+    const headers: Record<string, string> = {
         'Content-Type': 'application/json'
     };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
 };
 
 // 统一处理401错误
@@ -46,15 +46,80 @@ export const fetchHistory = async (): Promise<HistoryItem[]> => {
         id: item.id.toString(),
         title: item.title,
         date: new Date(item.created_at).getTime(),
-        result: item.data 
+        result: item.data,
+        audio_url: item.audio_url || null
     }));
+};
+
+export const resolveAudioUrl = async (url: string): Promise<string> => {
+    // If it's already a direct audio URL, return it
+    if (url.endsWith('.m4a') || url.endsWith('.mp3')) {
+        return url;
+    }
+    
+    // Otherwise, ask backend to resolve it
+    const response = await fetch(`${API_BASE_URL}/api/resolve-audio-url?url=${encodeURIComponent(url)}`, {
+        headers: getAuthHeaders() as any
+    });
+    
+    if (response.status === 401) {
+        handleUnauthorized();
+    }
+    
+    if (!response.ok) {
+        // If resolution fails, return original URL (might be a direct audio URL we don't recognize)
+        return url;
+    }
+    
+    const data = await response.json();
+    return data.resolved_url || url;
+};
+
+export const deleteHistoryItem = async (historyId: string): Promise<void> => {
+    const response = await fetch(`${API_BASE_URL}/api/history/${historyId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders() as any
+    });
+    
+    if (response.status === 401) {
+        handleUnauthorized();
+    }
+    
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(errorData.detail || `Failed to delete history item (${response.status})`);
+    }
+};
+
+export const regenerateSummary = async (historyId: string): Promise<PodcastAnalysisResult> => {
+    const headers = getAuthHeaders();
+    const response = await fetch(`${API_BASE_URL}/api/history/${historyId}/regenerate-summary`, {
+        method: 'POST',
+        headers: headers as Record<string, string>
+    });
+    
+    if (response.status === 401) {
+        handleUnauthorized();
+    }
+    
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(errorData.detail || `Failed to regenerate summary: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    return {
+        ...data.summary,
+        transcript: data.transcript
+    };
 };
 
 export const generateAnalysis = async (
   input: string | Blob,
   onProgress?: (percent: number, total: number, currentSection: string) => void,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _onPartialUpdate?: (partial: Partial<PodcastAnalysisResult>) => void
+  _onPartialUpdate?: (partial: Partial<PodcastAnalysisResult>) => void,
+  onAudioUrl?: (url: string) => void
 ): Promise<PodcastAnalysisResult> => {
   
   const formData = new FormData();
@@ -87,6 +152,7 @@ export const generateAnalysis = async (
     const decoder = new TextDecoder();
     let finalResult: PodcastAnalysisResult | null = null;
     let buffer = ""; 
+    let completedMessageReceived = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -101,38 +167,71 @@ export const generateAnalysis = async (
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
-            const jsonStr = line.slice(6);
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+            
             const data = JSON.parse(jsonStr);
 
             if (data.stage && data.percent !== undefined) {
+               console.log("SSE Progress update received:", { 
+                 stage: data.stage, 
+                 percent: data.percent, 
+                 msg: data.msg 
+               });
                if (onProgress) {
                    onProgress(data.percent, 100, data.msg || data.stage);
                }
             }
 
-            if (data.stage === 'completed' && data.summary) {
+            if (data.stage === 'resolved_url' && data.url) {
+                console.log("Audio URL resolved:", data.url);
+                if (onAudioUrl) {
+                    onAudioUrl(data.url);
+               }
+            }
+
+            if (data.stage === 'completed') {
+                completedMessageReceived = true;
+                if (data.summary) {
                 finalResult = data.summary as PodcastAnalysisResult;
                 if (data.transcript) {
                     finalResult.transcript = data.transcript;
                 }
+                // 包含 local_audio_path
+                if (data.local_audio_path) {
+                    finalResult.local_audio_path = data.local_audio_path;
+                }
+                }
             }
             
             if (data.stage === 'error') {
-                throw new Error(data.msg);
+                throw new Error(data.msg || 'Unknown error occurred');
             }
 
           } catch (e) {
             console.warn("SSE Parse Error:", e);
+            if (e instanceof SyntaxError) continue;
+            throw e;
           }
         }
       }
     }
 
-    if (buffer.startsWith('data: ')) {
+    if (buffer.trim()) {
+        const lines = buffer.split('\n\n');
+        for (const line of lines) {
+            if (line.startsWith('data: ')) {
         try {
-            const data = JSON.parse(buffer.slice(6));
-            if (data.stage === 'completed') finalResult = data.summary;
+                    const jsonStr = line.slice(6).trim();
+                    if (!jsonStr) continue;
+                    const data = JSON.parse(jsonStr);
+                    if (data.stage === 'completed' && data.summary) {
+                        finalResult = data.summary as PodcastAnalysisResult;
+                        if (data.transcript) finalResult.transcript = data.transcript;
+                    }
         } catch(e) {}
+            }
+        }
     }
 
     if (!finalResult) {
@@ -158,10 +257,10 @@ export const createPodcastChat = (analysis: PodcastAnalysisResult): BackendChatS
             try {
                 const response = await fetch(`${API_BASE_URL}/api/chat`, {
                     method: 'POST',
-                    headers: getAuthHeaders(),
+                    headers: getAuthHeaders() as Record<string, string>,
                     body: JSON.stringify({
                         message,
-                        context: analysis // Send the full analysis as context
+                        context: analysis
                     })
                 });
 
@@ -187,7 +286,7 @@ export const createPodcastChat = (analysis: PodcastAnalysisResult): BackendChatS
 export const addPodcaster = async (name: string, xiaoyuzhouId: string): Promise<Podcaster> => {
     const response = await fetch(`${API_BASE_URL}/api/podcasters`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getAuthHeaders() as Record<string, string>,
         body: JSON.stringify({ name, xiaoyuzhou_id: xiaoyuzhouId })
     });
     if (response.status === 401) {

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../AuthContext';
 
+const API_BASE_URL = ""; // 使用相对路径
+
 const LoginPage: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
@@ -15,25 +17,39 @@ const LoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      const endpoint = isLogin ? '/api/auth/token' : '/api/auth/register';
+      const endpoint = `${API_BASE_URL}${isLogin ? '/api/auth/token' : '/api/auth/register'}`;
       
       const formData = new URLSearchParams();
       formData.append('username', username);
       formData.append('password', password);
 
       let response;
-      if (isLogin) {
-          response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: formData,
-          });
-      } else {
-          response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
-          });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+      
+      try {
+        if (isLogin) {
+            response = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: formData,
+              signal: controller.signal,
+            });
+        } else {
+            response = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username, password }),
+              signal: controller.signal,
+            });
+        }
+        clearTimeout(timeoutId);
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          throw new Error('请求超时，请检查网络连接或稍后重试');
+        }
+        throw err;
       }
 
       const text = await response.text();

@@ -14,48 +14,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
   const [username, setUsername] = useState<string | null>(localStorage.getItem('username'));
 
-  // 验证token是否有效
-  useEffect(() => {
-    const verifyToken = async () => {
-      const storedToken = localStorage.getItem('token');
-      if (!storedToken) {
-        setToken(null);
-        setUsername(null);
-        return;
-      }
-
-      try {
-        // 验证token是否有效
-        const response = await fetch('/api/users/me', {
-          headers: {
-            'Authorization': `Bearer ${storedToken}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (response.status === 401) {
-          // Token无效，清除登录状态
-          setToken(null);
-          setUsername(null);
-          localStorage.removeItem('token');
-          localStorage.removeItem('username');
-        } else if (response.ok) {
-          // Token有效，保持登录状态
-          setToken(storedToken);
-          const storedUsername = localStorage.getItem('username');
-          if (storedUsername) {
-            setUsername(storedUsername);
-          }
-        }
-      } catch (error) {
-        console.error('Token verification failed:', error);
-        // 网络错误时不清除token，保持当前状态
-      }
-    };
-
-    verifyToken();
-  }, []); // 只在组件挂载时执行一次
-
   useEffect(() => {
     // Sync with local storage
     if (token) {
@@ -72,6 +30,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [token, username]);
 
   const login = (newToken: string, newUsername: string) => {
+    // 立即写入 localStorage，防止页面刷新或组件切换时的竞态条件
+    localStorage.setItem('token', newToken);
+    localStorage.setItem('username', newUsername);
     setToken(newToken);
     setUsername(newUsername);
   };

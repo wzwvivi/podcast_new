@@ -73,6 +73,7 @@ class HistoryItem(Base):
     title = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
     data_json = Column(Text) # Stores the full JSON result
+    audio_url = Column(String, nullable=True) # 存储音频URL用于查重
     owner = relationship("User", back_populates="history_items")
 
 class Podcaster(Base):
@@ -259,53 +260,141 @@ def fetch_xiaoyuzhou_podcaster_info(podcaster_id: str) -> Dict:
                         episodes_list = []
                         for ep in work_examples:
                             if isinstance(ep, dict) and ep.get("@type") == "AudioObject":
-                                # 提取音频URL - 需要从单集页面获取
-                                episode_id_match = re.search(r'/episode/([a-zA-Z0-9]+)', html)
+                                # 从 @id 或 contentUrl 中提取 episode ID
+                                ep_id = ""
+                                ep_url = ep.get("@id", "") or ep.get("contentUrl", "")
+                                if ep_url:
+                                    ep_id_match = re.search(r'/episode/([a-zA-Z0-9]+)', ep_url)
+                                    if ep_id_match:
+                                        ep_id = ep_id_match.group(1)
+                                
+                                # 如果没有找到 ID，跳过这个单集（因为无法获取音频URL）
+                                if not ep_id:
+                                    continue
+                                
+                                # 获取音频URL - 需要访问单集页面
+                                print(f"正在获取单集 {ep_id} 的音频URL...")
+                                audio_url = get_episode_audio_url(f"{domain}/episode/{ep_id}")
+                                print(f"单集 {ep_id} 的音频URL: {audio_url[:60] if audio_url else 'None'}...")
+                                
+                                # 获取时长
+                                duration = parse_duration_to_seconds(ep.get("duration", ""))
+                                # 如果从JSON-LD获取不到时长，尝试从音频URL获取
+                                if duration == 0 and audio_url:
+                                    print(f"从JSON-LD获取不到时长，尝试从音频URL获取: {audio_url[:50]}...")
+                                    duration = get_audio_duration_from_url(audio_url)
+                                    if duration > 0:
+                                        print(f"从音频URL获取到时长: {duration}秒")
+                                
                                 episodes_list.append({
                                     "title": ep.get("name", ""),
                                     "description": ep.get("description", ""),
-                                    "duration": parse_duration_to_seconds(ep.get("duration", "")),
+                                    "duration": duration,
                                     "publish_time": ep.get("datePublished"),
-                                    "id": episode_id_match.group(1) if episode_id_match else ""
+                                    "audio_url": audio_url,
+                                    "id": ep_id
                                 })
                         
-                        return {
-                            "name": json_ld_data.get("name", ""),
-                            "avatar_url": "",  # JSON-LD中没有头像，需要从其他地方提取
-                            "description": json_ld_data.get("description", ""),
-                            "episodes": episodes_list
-                        }
+                        if episodes_list:
+                            print(f"方法1(JSON-LD)成功提取 {len(episodes_list)} 个单集")
+                            # 提取播主信息
+                            title_match = re.search(r'<title[^>]*>([^<|]+)', html)
+                            desc_match = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']', html)
+                            avatar_match = re.search(r'<meta[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']', html)
+                            
+                            return {
+                                "name": json_ld_data.get("name", "") or (title_match.group(1).strip() if title_match else ""),
+                                "avatar_url": avatar_match.group(1) if avatar_match else "",
+                                "description": json_ld_data.get("description", "") or (desc_match.group(1) if desc_match else ""),
+                                "episodes": episodes_list
+                            }
+                        else:
+                            print(f"方法1(JSON-LD)提取到0个单集，继续使用方法2")
                     except Exception as e:
                         print(f"JSON-LD解析失败: {e}")
                 
                 # 方法2: 从页面HTML中提取单集列表
                 episodes_list = []
-                # 查找所有单集链接
-                episode_pattern = r'<a[^>]*href=["\']/episode/([a-zA-Z0-9]+)["\'][^>]*>.*?<img[^>]*src=["\']([^"\']+)["\']'
-                episode_matches = re.findall(episode_pattern, html, re.DOTALL)
                 
-                # 查找单集标题和描述
-                episode_cards = re.findall(r'<a[^>]*href=["\']/episode/([a-zA-Z0-9]+)["\'][^>]*class=["\'][^"]*card[^"]*["\'][^>]*>(.*?)</a>', html, re.DOTALL)
+                # 首先提取所有单集链接和ID - 使用更宽松的正则
+                episode_links = re.findall(r'/episode/([a-zA-Z0-9]{20,})', html)  # 小宇宙ID通常是24位字符
+                episode_ids = list(dict.fromkeys(episode_links))  # 去重但保持顺序
                 
-                for ep_id, card_html in episode_cards[:20]:  # 限制最多20个
-                    title_match = re.search(r'<div[^>]*class=["\'][^"]*title[^"]*["\'][^>]*>([^<]+)</div>', card_html)
-                    desc_match = re.search(r'<div[^>]*class=["\'][^"]*description[^"]*["\'][^>]*>.*?<p[^>]*>([^<]+)</p>', card_html, re.DOTALL)
-                    cover_match = re.search(r'<img[^>]*src=["\']([^"\']+)["\']', card_html)
-                    time_match = re.search(r'<time[^>]*dateTime=["\']([^"\']+)["\']', card_html)
-                    
-                    # 获取音频URL - 需要访问单集页面
-                    audio_url = get_episode_audio_url(f"{domain}/episode/{ep_id}")
-                    
-                    episodes_list.append({
-                        "title": title_match.group(1).strip() if title_match else "",
-                        "description": desc_match.group(1).strip() if desc_match else "",
-                        "cover_url": cover_match.group(1) if cover_match else "",
-                        "publish_time": time_match.group(1) if time_match else None,
-                        "audio_url": audio_url,
-                        "id": ep_id
-                    })
+                print(f"找到 {len(episode_ids)} 个单集ID: {episode_ids[:5]}...")
+                
+                # 为每个单集提取信息
+                for ep_id in episode_ids[:20]:  # 限制最多20个
+                    try:
+                        # 构建单集链接的正则，提取该单集在页面中的HTML块
+                        ep_link_pattern = rf'<a[^>]*href=["\']/episode/{re.escape(ep_id)}["\'][^>]*>(.*?)</a>'
+                        ep_match = re.search(ep_link_pattern, html, re.DOTALL)
+                        
+                        if ep_match:
+                            card_html = ep_match.group(1)
+                            
+                            # 提取标题 - 尝试多种模式
+                            title = ""
+                            title_patterns = [
+                                r'<div[^>]*class=["\'][^"]*title[^"]*["\'][^>]*>([^<]+)</div>',
+                                r'<h[1-6][^>]*>([^<]+)</h[1-6]>',
+                                r'<span[^>]*class=["\'][^"]*title[^"]*["\'][^>]*>([^<]+)</span>',
+                                r'<p[^>]*class=["\'][^"]*title[^"]*["\'][^>]*>([^<]+)</p>',
+                            ]
+                            for pattern in title_patterns:
+                                title_match = re.search(pattern, card_html)
+                                if title_match:
+                                    title = title_match.group(1).strip()
+                                    break
+                            
+                            # 如果还是没找到标题，尝试从链接附近的文本提取
+                            if not title:
+                                # 查找链接前后的文本
+                                context_pattern = rf'([^<>]{{10,100}})</a>.*?href=["\']/episode/{re.escape(ep_id)}["\']'
+                                context_match = re.search(context_pattern, html, re.DOTALL)
+                                if context_match:
+                                    title = context_match.group(1).strip()[:100]
+                            
+                            # 提取描述
+                            desc_match = re.search(r'<div[^>]*class=["\'][^"]*description[^"]*["\'][^>]*>.*?<p[^>]*>([^<]+)</p>', card_html, re.DOTALL)
+                            description = desc_match.group(1).strip() if desc_match else ""
+                            
+                            # 提取封面
+                            cover_match = re.search(r'<img[^>]*src=["\']([^"\']+)["\']', card_html)
+                            cover_url = cover_match.group(1) if cover_match else ""
+                            
+                            # 提取时间
+                            time_match = re.search(r'<time[^>]*dateTime=["\']([^"\']+)["\']', card_html)
+                            publish_time = time_match.group(1) if time_match else None
+                            
+                            # 获取音频URL - 需要访问单集页面
+                            print(f"正在获取单集 {ep_id} 的音频URL...")
+                            audio_url = get_episode_audio_url(f"{domain}/episode/{ep_id}")
+                            print(f"单集 {ep_id} ({title[:30] if title else '无标题'}) 的音频URL: {audio_url[:60] if audio_url else 'None'}...")
+                            
+                            # 获取时长 - 如果音频URL存在，尝试从音频文件获取
+                            duration = 0
+                            if audio_url:
+                                print(f"尝试从音频URL获取时长: {audio_url[:50]}...")
+                                duration = get_audio_duration_from_url(audio_url)
+                                if duration > 0:
+                                    print(f"从音频URL获取到时长: {duration}秒")
+                            
+                            if title or audio_url:  # 至少要有标题或音频URL才添加
+                                episodes_list.append({
+                                    "title": title or f"单集 {ep_id}",
+                                    "description": description,
+                                    "cover_url": cover_url,
+                                    "duration": duration,
+                                    "publish_time": publish_time,
+                                    "audio_url": audio_url,
+                                    "id": ep_id
+                                })
+                    except Exception as e:
+                        print(f"处理单集 {ep_id} 时出错: {e}")
+                        continue
                 
                 if episodes_list:
+                    print(f"方法2(HTML解析)成功提取 {len(episodes_list)} 个单集")
                     # 提取播主信息
                     title_match = re.search(r'<title[^>]*>([^<|]+)', html)
                     desc_match = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']', html)
@@ -317,6 +406,8 @@ def fetch_xiaoyuzhou_podcaster_info(podcaster_id: str) -> Dict:
                         "description": desc_match.group(1) if desc_match else "",
                         "episodes": episodes_list
                     }
+                else:
+                    print(f"方法2(HTML解析)提取到0个单集")
                 
                 # 方法3: 尝试提取RSS feed
                 rss_match = re.search(r'<link[^>]*rel=["\']alternate["\'][^>]*href=["\']([^"\']+)["\']', html)
@@ -348,6 +439,25 @@ def parse_duration_to_seconds(duration_str: str) -> int:
             return hours * 3600 + minutes * 60 + seconds
     except:
         pass
+    return 0
+
+def get_audio_duration_from_url(audio_url: str) -> int:
+    """从音频URL获取时长（秒），使用ffprobe"""
+    if not audio_url:
+        return 0
+    try:
+        # 使用ffprobe获取音频时长
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audio_url],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            duration = float(result.stdout.strip())
+            return int(duration)
+    except Exception as e:
+        print(f"获取音频时长失败 ({audio_url[:50]}...): {e}")
     return 0
 
 def get_episode_audio_url(episode_url: str) -> str:
@@ -558,14 +668,24 @@ def generate_summary_json(client, transcript):
             # 使用用户指定的 openai/gpt-oss-20b
             model="openai/gpt-oss-20b",
             messages=[
-                {"role": "system", "content": "你是一个只输出 JSON 的 API。你必须生成非常详尽、深度的内容，绝对禁止简短的概括。每个结论都要有充分的论据支持。\n\n【特别重要】关于cases数组中的story字段：\n1. 必须详细完整地叙述整个案例，包含：背景介绍、具体经过、关键人物/事件细节、转折点、最终结果或启示\n2. 每个案例至少150-300字，绝对不能只是一句话或几句话的概括\n3. 要像讲故事一样完整叙述，让读者能够完全理解这个案例的来龙去脉和意义\n4. 如果播客中提到的案例内容较少，需要基于上下文进行合理的扩展和解释，但要标注是基于播客内容的解读\n5. 如果播客中没有明确的案例，可以提取其中的故事、比喻、例子等作为案例，但要详细展开"},
+                {"role": "system", "content": "你是一个只输出 JSON 的 API。你必须生成非常详尽、深度的内容，绝对禁止简短的概括。每个结论都要有充分的论据支持。\n\n【特别重要】关于cases数组：\n1. 必须详细完整地叙述每个案例，包含：背景介绍、具体经过、关键人物/事件细节、转折点、最终结果或启示\n2. 每个案例至少150-300字，绝对不能只是一句话或几句话的概括\n3. 要像讲故事一样完整叙述，让读者能够完全理解这个案例的来龙去脉和意义\n4. 如果播客中提到了多个案例、故事、例子或比喻，必须全部提取并放入cases数组中，不要遗漏\n5. 如果播客中提到的案例内容较少，需要基于上下文进行合理的扩展和解释，但要标注是基于播客内容的解读\n6. 如果播客中没有明确的案例，可以提取其中的故事、比喻、例子等作为案例，但要详细展开\n7. cases数组应该包含所有找到的案例，不要因为内容相似就合并，每个独立的案例都应该单独列出"},
                 {"role": "user", "content": prompt.format(transcript=transcript[:60000])} 
             ],
             temperature=0.2,
             max_tokens=8192,
             response_format={"type": "json_object"}
         )
-        return json.loads(response.choices[0].message.content)
+        result = json.loads(response.choices[0].message.content)
+        
+        # 调试：打印 cases 数量
+        cases_count = len(result.get("cases", []))
+        print(f"生成的 Case Studies 数量: {cases_count}")
+        if cases_count > 0:
+            for i, case in enumerate(result.get("cases", [])):
+                story_len = len(case.get("story", ""))
+                print(f"  Case {i+1}: story长度={story_len}字, provesPoint={case.get('provesPoint', '')[:50]}")
+        
+        return result
     except Exception as e:
         print(f"Summary Error: {e}")
         # 返回一个包含错误信息的伪造结果，避免前端空白
@@ -591,6 +711,7 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
     client = Groq(api_key=GROQ_API_KEY)
     temp_base = os.path.join(TEMP_DIR, session_id)
     temp_source = ""
+    audio_url_to_save = None  # 用于查重的原始URL
     
     try:
         yield f"data: {json.dumps({'stage': 'downloading', 'percent': 10, 'msg': 'Downloading audio...'})}\n\n"
@@ -599,6 +720,10 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
             real_url = get_real_audio_url(url)
             if not real_url:
                 raise Exception("Invalid URL")
+            
+            audio_url_to_save = real_url
+            yield f"data: {json.dumps({'stage': 'resolved_url', 'url': real_url})}\n\n"
+            
             temp_source = f"{temp_base}.m4a"
             with requests.get(real_url, stream=True) as r:
                 r.raise_for_status()
@@ -608,6 +733,7 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
             temp_source = file_path 
             if not os.path.exists(temp_source):
                  raise Exception("File upload failed")
+            audio_url_to_save = f"file://{os.path.basename(file_path)}"
 
         yield f"data: {json.dumps({'stage': 'processing', 'percent': 30, 'msg': 'Slicing audio...'})}\n\n"
         
@@ -677,6 +803,22 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
         flush_buffer(paragraph_buffer, full_transcript_lines)
         transcript_str = "\n".join(full_transcript_lines)
         
+        yield f"data: {json.dumps({'stage': 'analyzing', 'percent': 85, 'msg': 'Saving audio file...'})}\n\n"
+        
+        # --- Save Audio File Persistently (在生成summary之前，避免阻塞) ---
+        local_audio_path = None
+        try:
+            ext = os.path.splitext(temp_source)[1]
+            if not ext: ext = ".mp3"
+            target_filename = f"{session_id}{ext}"
+            target_path = os.path.join("static", "audio", target_filename)
+            shutil.copy2(temp_source, target_path)
+            local_audio_path = f"/audio/{target_filename}"
+            print(f"Audio file saved to: {target_path}")
+        except Exception as e:
+            print(f"Failed to save local audio copy: {e}")
+        # ------------------------------------
+        
         yield f"data: {json.dumps({'stage': 'analyzing', 'percent': 90, 'msg': 'Generating deep insights...'})}\n\n"
         
         summary_json = generate_summary_json(client, transcript_str)
@@ -685,7 +827,8 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
             "stage": "completed",
             "percent": 100,
             "transcript": transcript_str, 
-            "summary": summary_json
+            "summary": summary_json,
+            "local_audio_path": local_audio_path # 将本地路径存入 JSON
         }
         
         # --- Save to DB ---
@@ -695,6 +838,7 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
             history_item = HistoryItem(
                 user_id=user_id,
                 title=title,
+                audio_url=audio_url_to_save, # 存原始URL用于查重
                 data_json=json.dumps(result_payload)
             )
             db.add(history_item)
@@ -709,8 +853,8 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
         yield f"data: {json.dumps({'stage': 'error', 'msg': str(e)})}\n\n"
     finally:
         try:
-            if temp_source and os.path.exists(temp_source) and source_type == "url": os.remove(temp_source)
-            # mp3_source已移除，因为现在直接切片，不需要中间文件
+            # 清理 temp_source (因为我们已经备份到 static/audio 了)
+            if temp_source and os.path.exists(temp_source): os.remove(temp_source)
             for p in chunk_paths: 
                 if os.path.exists(p): os.remove(p)
         except:
@@ -766,21 +910,36 @@ def get_history(current_user: User = Depends(get_current_user), db: Session = De
     results = []
     for item in items:
         try:
-            data = json.loads(item.data_json)
+            data = json.loads(item.data_json) if item.data_json else {}
             # data_json stores the streaming payload structure.
             # We want to extract 'summary' and 'transcript' to form PodcastAnalysisResult
             analysis_result = data.get('summary', {})
             if data.get('transcript'):
                 analysis_result['transcript'] = data.get('transcript')
+            # 包含 local_audio_path（如果存在）
+            if data.get('local_audio_path'):
+                analysis_result['local_audio_path'] = data.get('local_audio_path')
             
             results.append({
                 "id": item.id,
-                "title": item.title,
-                "created_at": item.created_at.isoformat(),
-                "data": analysis_result
+                "title": item.title or "Untitled",
+                "created_at": item.created_at.isoformat() if item.created_at else datetime.utcnow().isoformat(),
+                "data": analysis_result,
+                "audio_url": item.audio_url if hasattr(item, 'audio_url') else None  # 添加 audio_url 用于历史记录匹配
             })
-        except:
-            pass
+        except Exception as e:
+            print(f"Error processing history item {item.id}: {e}")
+            # 即使解析失败，也返回基本信息
+            try:
+                results.append({
+                    "id": item.id,
+                    "title": item.title or "Untitled",
+                    "created_at": item.created_at.isoformat() if item.created_at else datetime.utcnow().isoformat(),
+                    "data": {},
+                    "audio_url": item.audio_url if hasattr(item, 'audio_url') else None
+                })
+            except:
+                pass
     return results
 
 @app.post("/api/chat")
@@ -860,7 +1019,9 @@ async def add_podcaster(
         raise HTTPException(status_code=400, detail="播主已存在")
     
     # 获取播主信息
+    print(f"正在添加播主，xiaoyuzhou_id: {xiaoyuzhou_id}")
     info = fetch_xiaoyuzhou_podcaster_info(xiaoyuzhou_id)
+    print(f"获取到的播主信息: name={info.get('name')}, episodes数量={len(info.get('episodes', []))}")
     
     # 创建播主记录
     db_podcaster = Podcaster(
@@ -876,21 +1037,35 @@ async def add_podcaster(
     
     # 添加单集
     episodes_data = info.get("episodes", [])
+    added_count = 0
+    skipped_count = 0
+    
     for ep_data in episodes_data:
         ep_parsed = parse_xiaoyuzhou_episode(ep_data)
-        if ep_parsed.get("audio_url"):
+        audio_url = ep_parsed.get("audio_url")
+        ep_id = ep_parsed.get("xiaoyuzhou_episode_id")
+        
+        print(f"处理单集: title={ep_parsed.get('title', '')[:30]}, ep_id={ep_id}, audio_url={'有' if audio_url else '无'}")
+        
+        if audio_url:
             db_episode = PodcastEpisode(
                 podcaster_id=db_podcaster.id,
                 title=ep_parsed.get("title", ""),
-                audio_url=ep_parsed.get("audio_url", ""),
+                audio_url=audio_url,
                 cover_url=ep_parsed.get("cover_url"),
                 description=ep_parsed.get("description"),
                 duration=ep_parsed.get("duration"),
-                xiaoyuzhou_episode_id=ep_parsed.get("xiaoyuzhou_episode_id")
+                xiaoyuzhou_episode_id=ep_id
             )
             db.add(db_episode)
+            added_count += 1
+            print(f"  -> 添加成功")
+        else:
+            skipped_count += 1
+            print(f"  -> 跳过（无audio_url）")
     
     db.commit()
+    print(f"添加播主完成: 成功添加 {added_count} 个单集，跳过 {skipped_count} 个单集")
     
     episode_count = db.query(PodcastEpisode).filter(PodcastEpisode.podcaster_id == db_podcaster.id).count()
     return {
@@ -994,16 +1169,23 @@ async def refresh_podcaster(
     # 添加新单集
     new_count = 0
     episodes_data = info.get("episodes", [])
+    print(f"刷新播主 {podcaster_id}: 获取到 {len(episodes_data)} 个单集")
+    print(f"现有单集ID集合: {existing_ids}")
+    
     for ep_data in episodes_data:
         ep_parsed = parse_xiaoyuzhou_episode(ep_data)
         ep_id = ep_parsed.get("xiaoyuzhou_episode_id")
+        audio_url = ep_parsed.get("audio_url")
+        
+        print(f"处理单集: title={ep_parsed.get('title', '')[:30]}, ep_id={ep_id}, audio_url={'有' if audio_url else '无'}")
         
         # 只添加不存在的单集
-        if ep_id and ep_id not in existing_ids and ep_parsed.get("audio_url"):
+        if ep_id and ep_id not in existing_ids and audio_url:
+            print(f"  -> 添加新单集: {ep_id}")
             db_episode = PodcastEpisode(
                 podcaster_id=podcaster.id,
                 title=ep_parsed.get("title", ""),
-                audio_url=ep_parsed.get("audio_url", ""),
+                audio_url=audio_url,
                 cover_url=ep_parsed.get("cover_url"),
                 description=ep_parsed.get("description"),
                 duration=ep_parsed.get("duration"),
@@ -1011,6 +1193,12 @@ async def refresh_podcaster(
             )
             db.add(db_episode)
             new_count += 1
+        elif ep_id in existing_ids:
+            print(f"  -> 跳过已存在的单集: {ep_id}")
+        elif not ep_id:
+            print(f"  -> 跳过无ID的单集")
+        elif not audio_url:
+            print(f"  -> 跳过无音频URL的单集")
     
     db.commit()
     
@@ -1033,6 +1221,97 @@ async def delete_podcaster(
     db.delete(podcaster)
     db.commit()
     return {"message": "删除成功"}
+
+@app.get("/api/resolve-audio-url")
+def resolve_audio_url_endpoint(url: str):
+    real_url = get_real_audio_url(url)
+    if real_url:
+        return {"resolved_url": real_url}
+    else:
+        raise HTTPException(status_code=400, detail="Could not resolve audio URL")
+
+@app.delete("/api/history/{history_id}")
+async def delete_history(
+    history_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        history_item = db.query(HistoryItem).filter(
+            HistoryItem.id == history_id,
+            HistoryItem.user_id == current_user.id
+        ).first()
+        
+        if not history_item:
+            raise HTTPException(status_code=404, detail="History item not found")
+            
+        try:
+            if history_item.data_json:
+                data = json.loads(history_item.data_json)
+                local_path = data.get("local_audio_path")
+                if local_path and local_path.startswith("/audio/"):
+                    filename = local_path.replace("/audio/", "")
+                    file_path = os.path.join("static", "audio", filename)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        print(f"Deleted associated audio file: {file_path}")
+        except Exception as e:
+            print(f"Failed to delete audio file: {e}")
+
+        db.delete(history_item)
+        db.commit()
+        return {"status": "success", "message": "History item deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error deleting history item {history_id}: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete history item: {str(e)}")
+
+@app.post("/api/history/{history_id}/regenerate-summary")
+async def regenerate_summary(
+    history_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        history_item = db.query(HistoryItem).filter(
+            HistoryItem.id == history_id,
+            HistoryItem.user_id == current_user.id
+        ).first()
+        
+        if not history_item:
+            raise HTTPException(status_code=404, detail="History item not found")
+        
+        data = json.loads(history_item.data_json)
+        transcript = data.get("transcript", "")
+        local_audio_path = data.get("local_audio_path")
+        
+        if not transcript:
+             raise HTTPException(status_code=400, detail="Original transcript not found, cannot regenerate summary")
+
+        client = Groq(api_key=GROQ_API_KEY)
+        new_summary_json = generate_summary_json(client, transcript)
+        
+        result_payload = {
+            "stage": "completed",
+            "percent": 100,
+            "transcript": transcript,
+            "summary": new_summary_json,
+            "local_audio_path": local_audio_path 
+        }
+        
+        history_item.data_json = json.dumps(result_payload)
+        history_item.title = new_summary_json.get("title", history_item.title)
+        
+        db.commit()
+        
+        return result_payload
+
+    except Exception as e:
+        print(f"Error regenerating summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to regenerate summary: {str(e)}")
+
 
 # --- Static Files (Frontend) ---
 
