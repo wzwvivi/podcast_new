@@ -373,10 +373,26 @@ function AppContent() {
       }
       
       console.log("No existing analysis found, starting new analysis for:", url);
+      
+      // 清空之前的状态，确保切换到 New Analysis 界面
+      setResult(null);
+      setCurrentId(null);
+      setChatSession(null);
       setErrorMsg(null);
+      setIsTranscriptGenerating(false);
+      
+      // 关闭移动端侧边栏
       if (window.innerWidth < 1024) setIsSidebarOpen(false);
       
-      // 确保初始状态正确设置 - 从Step 1/3开始
+      // 清理音频
+      if (tempAudioUrlRef.current && tempAudioUrlRef.current.startsWith('blob:')) {
+        URL.revokeObjectURL(tempAudioUrlRef.current);
+      }
+      setAudioSrc(null);
+      tempAudioUrlRef.current = null;
+      setSeekTime(null);
+      
+      // 设置初始状态 - 从 Step 1/3 开始
       setProgress({ stage: 'Downloading', percent: 5, detail: 'Connecting to server...' });
       setStatus(ProcessingStatus.FETCHING);
       

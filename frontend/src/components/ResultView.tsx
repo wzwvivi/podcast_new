@@ -343,7 +343,7 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
                                   'bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20'
                               }`}>{item.role || 'Consensus'}</span>
                               {item.source && (
-                                <button onClick={() => handleTimeClick(item.source)} className="flex items-center gap-2 text-xs font-mono text-zinc-500 hover:text-brand-400 transition-colors">
+                                <button onClick={() => handleTimeClick(item.source.split('-')[0].trim())} className="flex items-center gap-2 text-xs font-mono text-zinc-500 hover:text-brand-400 transition-colors">
                                     <PlayCircleIcon className="w-3.5 h-3.5" />
                                     {item.source}
                                 </button>
@@ -373,7 +373,7 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
                       <div className="hidden md:block absolute left-[-24px] top-5 w-0.5 h-full bg-zinc-800 -z-0 last:h-0"></div>
                       <div className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-2">
                          <h4 className="text-xl font-bold text-zinc-200">{block.title}</h4>
-                         <button onClick={() => handleTimeClick(block.scope.split('-')[0])} className="text-xs font-mono text-zinc-600 bg-zinc-900 px-2 py-1 rounded hover:text-brand-400 hover:bg-zinc-800 transition-colors cursor-pointer">{block.scope}</button>
+                         <button onClick={() => handleTimeClick(block.scope.split('-')[0].trim())} className="text-xs font-mono text-zinc-600 bg-zinc-900 px-2 py-1 rounded hover:text-brand-400 hover:bg-zinc-800 transition-colors cursor-pointer">{block.scope}</button>
                       </div>
                       <div className="bg-zinc-900/30 p-6 rounded-xl border border-zinc-800/50 hover:bg-zinc-900/50 transition-colors duration-300">
                           <p className="text-zinc-300 leading-8 text-lg">{block.coreView}</p>
@@ -429,7 +429,7 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
                               <span>{c.provesPoint}</span>
                            </div>
                            {c.source && (
-                                <button onClick={() => handleTimeClick(c.source)} className="flex items-center gap-2 text-xs font-mono text-zinc-500 hover:text-pink-400 transition-colors mt-2">
+                                <button onClick={() => handleTimeClick(c.source.split('-')[0].trim())} className="flex items-center gap-2 text-xs font-mono text-zinc-500 hover:text-pink-400 transition-colors mt-2">
                                     <PlayCircleIcon className="w-3.5 h-3.5" />
                                     {c.source}
                                 </button>

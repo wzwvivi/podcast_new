@@ -301,13 +301,13 @@ def fetch_xiaoyuzhou_podcaster_info(podcaster_id: str) -> Dict:
                             title_match = re.search(r'<title[^>]*>([^<|]+)', html)
                             desc_match = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']', html)
                             avatar_match = re.search(r'<meta[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']', html)
-                            
-                            return {
+                        
+                        return {
                                 "name": json_ld_data.get("name", "") or (title_match.group(1).strip() if title_match else ""),
                                 "avatar_url": avatar_match.group(1) if avatar_match else "",
                                 "description": json_ld_data.get("description", "") or (desc_match.group(1) if desc_match else ""),
-                                "episodes": episodes_list
-                            }
+                            "episodes": episodes_list
+                        }
                         else:
                             print(f"方法1(JSON-LD)提取到0个单集，继续使用方法2")
                     except Exception as e:
@@ -355,20 +355,20 @@ def fetch_xiaoyuzhou_podcaster_info(podcaster_id: str) -> Dict:
                                     title = context_match.group(1).strip()[:100]
                             
                             # 提取描述
-                            desc_match = re.search(r'<div[^>]*class=["\'][^"]*description[^"]*["\'][^>]*>.*?<p[^>]*>([^<]+)</p>', card_html, re.DOTALL)
+                    desc_match = re.search(r'<div[^>]*class=["\'][^"]*description[^"]*["\'][^>]*>.*?<p[^>]*>([^<]+)</p>', card_html, re.DOTALL)
                             description = desc_match.group(1).strip() if desc_match else ""
                             
                             # 提取封面
-                            cover_match = re.search(r'<img[^>]*src=["\']([^"\']+)["\']', card_html)
+                    cover_match = re.search(r'<img[^>]*src=["\']([^"\']+)["\']', card_html)
                             cover_url = cover_match.group(1) if cover_match else ""
                             
                             # 提取时间
-                            time_match = re.search(r'<time[^>]*dateTime=["\']([^"\']+)["\']', card_html)
+                    time_match = re.search(r'<time[^>]*dateTime=["\']([^"\']+)["\']', card_html)
                             publish_time = time_match.group(1) if time_match else None
-                            
-                            # 获取音频URL - 需要访问单集页面
+                    
+                    # 获取音频URL - 需要访问单集页面
                             print(f"正在获取单集 {ep_id} 的音频URL...")
-                            audio_url = get_episode_audio_url(f"{domain}/episode/{ep_id}")
+                    audio_url = get_episode_audio_url(f"{domain}/episode/{ep_id}")
                             print(f"单集 {ep_id} ({title[:30] if title else '无标题'}) 的音频URL: {audio_url[:60] if audio_url else 'None'}...")
                             
                             # 获取时长 - 如果音频URL存在，尝试从音频文件获取
@@ -380,15 +380,15 @@ def fetch_xiaoyuzhou_podcaster_info(podcaster_id: str) -> Dict:
                                     print(f"从音频URL获取到时长: {duration}秒")
                             
                             if title or audio_url:  # 至少要有标题或音频URL才添加
-                                episodes_list.append({
+                    episodes_list.append({
                                     "title": title or f"单集 {ep_id}",
                                     "description": description,
                                     "cover_url": cover_url,
                                     "duration": duration,
                                     "publish_time": publish_time,
-                                    "audio_url": audio_url,
-                                    "id": ep_id
-                                })
+                        "audio_url": audio_url,
+                        "id": ep_id
+                    })
                     except Exception as e:
                         print(f"处理单集 {ep_id} 时出错: {e}")
                         continue
@@ -735,17 +735,57 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
                  raise Exception("File upload failed")
             audio_url_to_save = f"file://{os.path.basename(file_path)}"
 
-        yield f"data: {json.dumps({'stage': 'processing', 'percent': 30, 'msg': 'Slicing audio...'})}\n\n"
+        yield f"data: {json.dumps({'stage': 'processing', 'percent': 20, 'msg': 'Slicing audio...'})}\n\n"
         
         # 优化：合并转换和切片为一次ffmpeg调用，大幅提升速度
         chunk_pattern = f"{temp_base}_%03d.mp3"
-        subprocess.run([
+        
+        # 启动 ffmpeg 进程
+        import time
+        process = subprocess.Popen([
             "ffmpeg", "-i", temp_source, "-y",
             "-f", "segment", "-segment_time", "600",
             "-c:a", "libmp3lame", "-ab", "64k", "-ar", "16000", "-ac", "1",
             "-threads", "0",  # 使用所有可用CPU核心
             chunk_pattern
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # 模拟进度增长（20-40%，每秒增长1%）
+        progress_percent = 20
+        last_update = time.time()
+        
+        while process.poll() is None:
+            current_time = time.time()
+            
+            # 每秒发送一次进度更新
+            if current_time - last_update >= 1.0:
+                if progress_percent < 39:
+                    progress_percent = min(39, progress_percent + 1)
+                    yield f"data: {json.dumps({'stage': 'processing', 'percent': int(progress_percent), 'msg': 'Slicing audio... please wait'})}\n\n"
+                    last_update = current_time
+            
+            time.sleep(0.1)
+        
+        # 检查返回码
+        if process.returncode != 0:
+            raise Exception(f"FFmpeg failed with return code {process.returncode}")
+        
+        yield f"data: {json.dumps({'stage': 'processing', 'percent': 40, 'msg': 'Audio sliced successfully'})}\n\n"
+        
+        # --- 提前保存音频文件（在slicing完成后立即保存，让用户可以更早加载音频）---
+        local_audio_path = None
+        try:
+            ext = os.path.splitext(temp_source)[1]
+            if not ext: ext = ".mp3"
+            target_filename = f"{session_id}{ext}"
+            target_path = os.path.join("static", "audio", target_filename)
+            shutil.copy2(temp_source, target_path)
+            local_audio_path = f"/audio/{target_filename}"
+            print(f"Audio file saved early to: {target_path}")
+            yield f"data: {json.dumps({'stage': 'processing', 'percent': 42, 'msg': 'Audio ready for playback', 'audio_url': local_audio_path})}\n\n"
+        except Exception as e:
+            print(f"Failed to save local audio copy early: {e}")
+        # ------------------------------------
         
         chunk_files = sorted([f for f in os.listdir(TEMP_DIR) if f.startswith(f"{session_id}_") and f.endswith(".mp3")])
         chunk_paths = [os.path.join(TEMP_DIR, f) for f in chunk_files]
@@ -766,7 +806,7 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
                 idx, result = future.result()
                 transcript_results[idx] = result
                 
-                percent = 30 + int((completed / total_chunks) * 50) 
+                percent = 40 + int((completed / total_chunks) * 45) 
                 yield f"data: {json.dumps({'stage': 'transcribing', 'percent': percent, 'msg': f'Transcribing chunk {completed}/{total_chunks}'})}\n\n"
 
         full_text_pure = ""
@@ -803,23 +843,9 @@ async def process_audio_logic(source_type: str, user_id: int, url: str = None, f
         flush_buffer(paragraph_buffer, full_transcript_lines)
         transcript_str = "\n".join(full_transcript_lines)
         
-        yield f"data: {json.dumps({'stage': 'analyzing', 'percent': 85, 'msg': 'Saving audio file...'})}\n\n"
+        # 注意：音频文件已在slicing后提前保存，此处不再重复保存
         
-        # --- Save Audio File Persistently (在生成summary之前，避免阻塞) ---
-        local_audio_path = None
-        try:
-            ext = os.path.splitext(temp_source)[1]
-            if not ext: ext = ".mp3"
-            target_filename = f"{session_id}{ext}"
-            target_path = os.path.join("static", "audio", target_filename)
-            shutil.copy2(temp_source, target_path)
-            local_audio_path = f"/audio/{target_filename}"
-            print(f"Audio file saved to: {target_path}")
-        except Exception as e:
-            print(f"Failed to save local audio copy: {e}")
-        # ------------------------------------
-        
-        yield f"data: {json.dumps({'stage': 'analyzing', 'percent': 90, 'msg': 'Generating deep insights...'})}\n\n"
+        yield f"data: {json.dumps({'stage': 'analyzing', 'percent': 85, 'msg': 'Generating deep insights...'})}\n\n"
         
         summary_json = generate_summary_json(client, transcript_str)
         
@@ -937,10 +963,35 @@ def get_history(current_user: User = Depends(get_current_user), db: Session = De
                     "created_at": item.created_at.isoformat() if item.created_at else datetime.utcnow().isoformat(),
                     "data": {},
                     "audio_url": item.audio_url if hasattr(item, 'audio_url') else None
-                })
-            except:
-                pass
+            })
+        except:
+            pass
     return results
+
+def web_search(query: str, max_results: int = 5) -> str:
+    """使用 DuckDuckGo 进行网络搜索"""
+    try:
+        from duckduckgo_search import DDGS
+        
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
+            
+        if not results:
+            return "No search results found."
+        
+        # 格式化搜索结果
+        formatted_results = []
+        for i, result in enumerate(results, 1):
+            formatted_results.append(
+                f"{i}. {result.get('title', 'No title')}\n"
+                f"   {result.get('body', 'No description')}\n"
+                f"   URL: {result.get('href', 'No URL')}"
+            )
+        
+        return "\n\n".join(formatted_results)
+    except Exception as e:
+        print(f"Search error: {e}")
+        return f"Search failed: {str(e)}"
 
 @app.post("/api/chat")
 async def chat(
@@ -957,19 +1008,94 @@ async def chat(
         Core Conclusions: {json.dumps(request.context.get('coreConclusions', []), ensure_ascii=False)}
         """
 
+        # Define web search tool for function calling
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search the web for current information, news, facts, or any knowledge not in the podcast context. Use this when the user asks about topics not covered in the podcast, or needs real-time/updated information.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query to look up on the web"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }
+        ]
+
+        # Initial message
+        messages = [
+            {"role": "system", "content": f"""You are a helpful AI assistant. You have access to:
+1. Podcast context (provided below) - use this to answer questions about the podcast
+2. Web search tool - use this ONLY when the question requires information not in the podcast context
+
+Podcast Context:
+{context_str}
+
+Guidelines:
+- For questions about the podcast content, use the context provided
+- For questions about external topics, current events, or general knowledge, use web_search
+- Keep answers concise and relevant
+- If using search results, cite your sources"""},
+            {"role": "user", "content": request.message}
+        ]
+
+        # First API call
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant", # Use a fast model for chat
-            messages=[
-                {"role": "system", "content": "You are a helpful AI assistant discussing a podcast. Answer the user's questions based on the provided podcast context. Keep answers concise and relevant."},
-                {"role": "user", "content": f"Context:\n{context_str}\n\nUser Question: {request.message}"}
-            ],
+            model="llama-3.3-70b-versatile",  # Latest model supporting function calling
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
             temperature=0.7,
             max_tokens=1024
         )
         
-        return {"response": response.choices[0].message.content}
+        response_message = response.choices[0].message
+        
+        # Check if model wants to use tools
+        if response_message.tool_calls:
+            # Execute tool calls
+            messages.append(response_message)
+            
+            for tool_call in response_message.tool_calls:
+                if tool_call.function.name == "web_search":
+                    function_args = json.loads(tool_call.function.arguments)
+                    search_query = function_args.get("query", "")
+                    
+                    print(f"Executing web search: {search_query}")
+                    search_results = web_search(search_query)
+                    
+                    # Add function response
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": "web_search",
+                        "content": search_results
+                    })
+            
+            # Second API call with search results
+            final_response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1024
+            )
+            
+            return {"response": final_response.choices[0].message.content}
+        else:
+            # No tool call needed, return direct response
+            return {"response": response_message.content}
+            
     except Exception as e:
         print(f"Chat Error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/analyze/url")

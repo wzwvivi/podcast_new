@@ -176,10 +176,17 @@ export const generateAnalysis = async (
                console.log("SSE Progress update received:", { 
                  stage: data.stage, 
                  percent: data.percent, 
-                 msg: data.msg 
+                 msg: data.msg,
+                 audio_url: data.audio_url 
                });
                if (onProgress) {
                    onProgress(data.percent, 100, data.msg || data.stage);
+               }
+               
+               // 如果在进度更新中携带了 audio_url，立即通知前端（音频提前可用）
+               if (data.audio_url && onAudioUrl) {
+                   console.log("Audio URL available early:", data.audio_url);
+                   onAudioUrl(data.audio_url);
                }
             }
 
