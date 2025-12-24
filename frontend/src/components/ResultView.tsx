@@ -1,11 +1,20 @@
 import React, { useState } from 'react';
 import { PodcastAnalysisResult } from '../types';
 import { CheckIcon, PlayCircleIcon, LightbulbIcon } from './Icons';
+// import { identifySpeakers, identifySpeakersDirect, generateMindMap } from '../services/geminiService';
+// import { MindMap } from './MindMap';
+
+// Temporary mocks to fix build after file restoration
+const identifySpeakers = async (id: any) => { throw new Error("Feature temporarily unavailable (code missing)"); };
+const identifySpeakersDirect = async (t: any) => { throw new Error("Feature temporarily unavailable (code missing)"); };
+const generateMindMap = async (id: any) => { throw new Error("Feature temporarily unavailable (code missing)"); };
+const MindMap = ({ content }: any) => <div className="text-white p-4">Mind Map feature is currently unavailable.</div>;
 
 interface ResultViewProps {
   data: PodcastAnalysisResult;
   isTranscriptGenerating: boolean;
   onSeek: (time: number) => void;
+  historyId?: string | null;
 }
 
 // Helper to parse "MM:SS" or "[MM:SS]" to seconds
@@ -145,13 +154,82 @@ const formatNotionContent = (data: PodcastAnalysisResult): string => {
   return content;
 };
 
-const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, onSeek }) => {
-  const [activeTab, setActiveTab] = useState<'report' | 'transcript' | 'notion'>('report');
+const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, onSeek, historyId }) => {
+  const [activeTab, setActiveTab] = useState<'report' | 'mindmap' | 'transcript' | 'notion'>('report');
+  const [showSpeakerView, setShowSpeakerView] = useState(false);
+  const [speakerTranscript, setSpeakerTranscript] = useState<string | null>(null);
+  const [isLoadingSpeakers, setIsLoadingSpeakers] = useState(false);
+  const [isCached, setIsCached] = useState(false);
+  const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(historyId || null);
+  const [mindMap, setMindMap] = useState<string | null>(data.mindMap || null);
+  const [isGeneratingMindMap, setIsGeneratingMindMap] = useState(false);
+  
+  // 当historyId改变时，清空说话人识别缓存，并重置视图
+  React.useEffect(() => {
+    if (historyId !== currentHistoryId) {
+      setShowSpeakerView(false);
+      setSpeakerTranscript(null);
+      setIsCached(false);
+      setCurrentHistoryId(historyId || null);
+      // 重置思维导图状态
+      setMindMap(data.mindMap || null);
+    }
+  }, [historyId, currentHistoryId, data.mindMap]);
   
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const toggleSpeakerView = async () => {
+    if (showSpeakerView) {
+      // 切换回原始视图
+      setShowSpeakerView(false);
+    } else {
+      // 切换到说话人视图
+      if (speakerTranscript) {
+        // 已经有缓存，直接显示
+        setShowSpeakerView(true);
+      } else {
+        // 需要生成说话人版本
+        setIsLoadingSpeakers(true);
+        try {
+          let result;
+          
+          if (historyId) {
+            // 已登录且有历史记录，使用带缓存的API
+            result = await identifySpeakers(historyId);
+          } else {
+            // 未登录或未保存，直接处理transcript
+            if (!data.transcript || data.transcript.length < 50) {
+              throw new Error('Transcript is too short or not available');
+            }
+            result = await identifySpeakersDirect(data.transcript);
+          }
+          
+          if (!result.transcript || result.transcript.length < 50) {
+            throw new Error('Invalid speaker transcript received');
+          }
+          
+          console.log(`Speaker identification ${result.cached ? 'loaded from cache' : 'generated'}: ${result.transcript.length} chars`);
+          
+          setSpeakerTranscript(result.transcript);
+          setIsCached(result.cached);
+          setShowSpeakerView(true);
+        } catch (error: any) {
+          console.error('Speaker identification failed:', error);
+          const errorMsg = error.message || 'Unknown error';
+          if (errorMsg.includes('timeout')) {
+            alert('The transcript is too long to process. This feature works best with podcasts under 90 minutes.');
+          } else {
+            alert(`Failed to identify speakers: ${errorMsg}\n\nYou can still view the original transcript.`);
+          }
+        } finally {
+          setIsLoadingSpeakers(false);
+        }
+      }
     }
   };
 
@@ -164,6 +242,35 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
       } else {
           console.warn("Failed to parse time:", timeStr);
       }
+  };
+
+  const handleTimeStringClick = (timeStr: string) => {
+    if (!timeStr) return;
+    // 如果是时间范围 "[00:00] - [05:30]"，取第一个时间
+    const firstTime = timeStr.split('-')[0].trim();
+    handleTimeClick(firstTime);
+  };
+
+  const handleGenerateMindMap = async () => {
+    if (!historyId) {
+      alert('Cannot generate mind map: Missing history ID');
+      return;
+    }
+    
+    setIsGeneratingMindMap(true);
+    try {
+      const mindMapContent = await generateMindMap(historyId);
+      setMindMap(mindMapContent);
+      // 更新 data 对象（如果可能的话）
+      if (data) {
+        (data as any).mindMap = mindMapContent;
+      }
+    } catch (error: any) {
+      console.error('Failed to generate mind map:', error);
+      alert(`Failed to generate mind map: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsGeneratingMindMap(false);
+    }
   };
 
   const isTranscriptEmpty = !data.transcript || data.transcript.trim().length === 0;
@@ -196,6 +303,16 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
             }`}
           >
             Deep Dive Report
+          </button>
+          <button
+            onClick={() => setActiveTab('mindmap')}
+            className={`flex-1 md:flex-none px-6 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
+              activeTab === 'mindmap' 
+                ? 'bg-zinc-800 text-white shadow-sm ring-1 ring-white/10' 
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+            }`}
+          >
+            Mind Map
           </button>
           <button
             onClick={() => setActiveTab('transcript')}
@@ -252,7 +369,51 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
         {/* RIGHT CONTENT AREA */}
         <div className="flex-1 min-w-0 space-y-16">
           
-          {activeTab === 'notion' ? (
+          {activeTab === 'mindmap' ? (
+            <div className="bg-zinc-950 rounded-2xl p-8 md:p-12 border border-zinc-800 min-h-[50vh] shadow-inner animate-fade-in-up">
+              {!mindMap && !isGeneratingMindMap ? (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <div className="text-center space-y-6">
+                    <div className="w-16 h-16 rounded-full bg-brand-500/10 flex items-center justify-center mx-auto">
+                      <svg className="w-8 h-8 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                      </svg>
+                    </div>
+                    <h3 className="text-2xl font-bold text-white">Mind Map</h3>
+                    <p className="text-zinc-400 max-w-md mx-auto">
+                      Generate a visual mind map based on podcast content to help you better understand the structure and key insights.
+                    </p>
+                    <button
+                      onClick={handleGenerateMindMap}
+                      disabled={!historyId}
+                      className={`px-6 py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-lg font-medium transition-colors ${
+                        !historyId ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
+                    >
+                      Generate Mind Map
+                    </button>
+                    {!historyId && (
+                      <p className="text-xs text-zinc-500 mt-2">Saved analysis record required to generate mind map</p>
+                    )}
+                  </div>
+                </div>
+              ) : isGeneratingMindMap ? (
+                <div className="flex flex-col items-center justify-center py-20 text-zinc-500 space-y-6">
+                  <div className="w-8 h-8 border-2 border-zinc-700 border-t-brand-500 rounded-full animate-spin"></div>
+                  <div className="text-center">
+                    <p className="text-zinc-300 font-medium">Generating mind map, please wait...</p>
+                    <p className="text-xs text-zinc-600 mt-2 max-w-xs mx-auto">This may take a few minutes</p>
+                  </div>
+                </div>
+              ) : mindMap ? (
+                <div className="prose prose-invert prose-lg max-w-none">
+                  <div className="bg-zinc-900/50 rounded-lg p-6 border border-zinc-800">
+                    <ReactMarkdown className="text-zinc-200">{mindMap}</ReactMarkdown>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : activeTab === 'notion' ? (
             <div className="bg-zinc-950 rounded-2xl p-8 md:p-12 border border-zinc-800 font-mono text-sm leading-loose text-zinc-300 min-h-[50vh] shadow-inner animate-fade-in-up relative">
               {/* Copy Button */}
               <button
@@ -280,7 +441,61 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
               </div>
             </div>
           ) : activeTab === 'transcript' ? (
-             <div className="bg-zinc-950 rounded-2xl p-8 md:p-12 border border-zinc-800 font-mono text-sm leading-loose text-zinc-300 min-h-[50vh] shadow-inner animate-fade-in-up">
+             <div className="bg-zinc-950 rounded-2xl p-8 md:p-12 border border-zinc-800 font-mono text-sm leading-loose text-zinc-300 min-h-[50vh] shadow-inner animate-fade-in-up relative">
+                {/* Toggle Buttons */}
+                {!isTranscriptEmpty && !isTranscriptGenerating && (
+                  <div className="flex justify-end gap-3 mb-6 -mt-2">
+                    {/* Copy Button */}
+                    <button
+                      onClick={() => {
+                        const textToCopy = showSpeakerView && speakerTranscript ? speakerTranscript : data.transcript;
+                        navigator.clipboard.writeText(textToCopy).then(() => {
+                          alert('Transcript copied to clipboard!');
+                        }).catch(() => {
+                          alert('Failed to copy to clipboard');
+                        });
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm font-medium transition-colors border border-zinc-700"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                      Copy
+                    </button>
+                    {/* Identify Speakers Button */}
+                    <button
+                      onClick={toggleSpeakerView}
+                      disabled={isLoadingSpeakers}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                        showSpeakerView
+                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30 hover:bg-purple-500/30'
+                          : 'bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700'
+                      } ${isLoadingSpeakers ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {isLoadingSpeakers ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-zinc-600 border-t-purple-400 rounded-full animate-spin"></div>
+                          <span>Processing...</span>
+                        </>
+                      ) : showSpeakerView ? (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                          </svg>
+                          <span>Show Original {isCached && '(Cached)'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                          <span>Identify Speakers</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
                 {isTranscriptEmpty && isTranscriptGenerating ? (
                    <div className="flex flex-col items-center justify-center h-full py-20 text-zinc-500 space-y-6">
                       <div className="w-8 h-8 border-2 border-zinc-700 border-t-brand-500 rounded-full animate-spin"></div>
@@ -293,18 +508,86 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
                     <div className="text-center text-zinc-500 py-12 italic">No transcript generated.</div>
                 ) : (
                   <div className="whitespace-pre-wrap relative space-y-4">
-                    {data.transcript.split('\n').map((line, i) => {
-                        const match = line.match(/^\[([\d:]+)\s*-\s*([\d:]+)\](.*)/);
-                        if (match) {
-                            return (
-                                <div key={i} className="group hover:bg-zinc-900/50 p-2 -mx-2 rounded cursor-pointer transition-colors" onClick={() => handleTimeClick(match[1])}>
-                                    <span className="text-brand-500 font-bold mr-3 text-xs opacity-70 group-hover:opacity-100 font-mono">{match[1]}</span>
-                                    <span className="text-zinc-300">{match[3]}</span>
-                                </div>
-                            )
+                    {(() => {
+                      // 决定显示哪个transcript（说话人版本或原始版本）
+                      let textToDisplay = data.transcript;
+                      let isSpeakerMode = false;
+                      
+                      if (showSpeakerView && speakerTranscript) {
+                        textToDisplay = speakerTranscript;
+                        isSpeakerMode = true;
+                      }
+                      
+                      console.log('=== Transcript Display Debug ===');
+                      console.log('showSpeakerView:', showSpeakerView);
+                      console.log('speakerTranscript exists:', !!speakerTranscript);
+                      console.log('speakerTranscript length:', speakerTranscript ? speakerTranscript.length : 0);
+                      console.log('data.transcript length:', data.transcript ? data.transcript.length : 0);
+                      console.log('isSpeakerMode:', isSpeakerMode);
+                      console.log('textToDisplay length:', textToDisplay.length);
+                      console.log('First 200 chars:', textToDisplay.substring(0, 200));
+                      
+                      // 检查说话人格式
+                      if (speakerTranscript) {
+                        const firstLines = speakerTranscript.split('\n').slice(0, 5);
+                        console.log('First 5 lines of speakerTranscript:', firstLines);
+                        const hasSpeakerFormat = firstLines.some(line => /:\s/.test(line));
+                        console.log('Has speaker format (contains ": "):', hasSpeakerFormat);
+                      }
+                      
+                      return textToDisplay.split('\n').map((line, i) => {
+                        // 跳过空行
+                        if (!line.trim()) return null;
+                        
+                        // 说话人格式: [时间戳] 说话人: 内容
+                        // 更宽松的正则：允许冒号前有空格，冒号后可以有或没有空格
+                        const speakerMatch = line.match(/^\[([\d:]+)\s*-\s*([\d:]+)\]\s*([^:：]+)[:：]\s*(.*)/);
+                        if (speakerMatch && isSpeakerMode) {
+                          console.log(`Matched speaker line ${i}:`, speakerMatch[3], speakerMatch[4].substring(0, 50));
+                            const speaker = speakerMatch[3].trim();
+                            const content = speakerMatch[4];
+                            
+                            // 根据说话人类型设置颜色
+                            let speakerColor = 'text-blue-400';
+                            let bgColor = 'bg-blue-500/5';
+                            let borderColor = 'border-blue-500/20';
+                            
+                            if (speaker.includes('主持') || speaker.includes('Host')) {
+                                speakerColor = 'text-emerald-400';
+                                bgColor = 'bg-emerald-500/5';
+                                borderColor = 'border-emerald-500/20';
+                            } else if (speaker.includes('嘉宾') || speaker.includes('Guest')) {
+                                speakerColor = 'text-purple-400';
+                                bgColor = 'bg-purple-500/5';
+                                borderColor = 'border-purple-500/20';
+                            }
+                            
+                          return (
+                              <div key={i} className={`group hover:bg-zinc-900/50 p-4 rounded-lg border ${borderColor} ${bgColor} cursor-pointer transition-all hover:border-zinc-600`} onClick={() => handleTimeClick(speakerMatch[1])}>
+                                  <div className="flex items-start gap-3 mb-2">
+                                      <span className={`${speakerColor} font-bold text-sm shrink-0`}>{speaker}</span>
+                                      <span className="text-brand-500/60 font-mono text-xs opacity-70 group-hover:opacity-100 shrink-0">{speakerMatch[1]}</span>
+                                  </div>
+                                  <p className="text-zinc-300 leading-relaxed pl-0">{content}</p>
+                              </div>
+                          );
                         }
-                        return <div key={i}>{line}</div>
-                    })}
+                        
+                        // 原始格式: [时间戳] 内容
+                        const timeMatch = line.match(/^\[([\d:]+)\s*-\s*([\d:]+)\](.*)/);
+                        if (timeMatch) {
+                          return (
+                              <div key={i} className="group hover:bg-zinc-900/50 p-2 -mx-2 rounded cursor-pointer transition-colors" onClick={() => handleTimeClick(timeMatch[1])}>
+                                  <span className="text-brand-500 font-bold mr-3 text-xs opacity-70 group-hover:opacity-100 font-mono">{timeMatch[1]}</span>
+                                  <span className="text-zinc-300">{timeMatch[3]}</span>
+                              </div>
+                          );
+                        }
+                        
+                        // 其他文本行
+                        return <div key={i} className="text-zinc-400 text-sm">{line}</div>;
+                      });
+                    })()}
                   </div>
                 )}
              </div>
@@ -343,7 +626,7 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
                                   'bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20'
                               }`}>{item.role || 'Consensus'}</span>
                               {item.source && (
-                                <button onClick={() => handleTimeClick(item.source.split('-')[0].trim())} className="flex items-center gap-2 text-xs font-mono text-zinc-500 hover:text-brand-400 transition-colors">
+                                <button onClick={() => handleTimeStringClick(item.source)} className="flex items-center gap-2 text-xs font-mono text-zinc-500 hover:text-brand-400 transition-colors">
                                     <PlayCircleIcon className="w-3.5 h-3.5" />
                                     {item.source}
                                 </button>
@@ -373,7 +656,7 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
                       <div className="hidden md:block absolute left-[-24px] top-5 w-0.5 h-full bg-zinc-800 -z-0 last:h-0"></div>
                       <div className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-2">
                          <h4 className="text-xl font-bold text-zinc-200">{block.title}</h4>
-                         <button onClick={() => handleTimeClick(block.scope.split('-')[0].trim())} className="text-xs font-mono text-zinc-600 bg-zinc-900 px-2 py-1 rounded hover:text-brand-400 hover:bg-zinc-800 transition-colors cursor-pointer">{block.scope}</button>
+                         <button onClick={() => handleTimeStringClick(block.scope)} className="text-xs font-mono text-zinc-600 bg-zinc-900 px-2 py-1 rounded hover:text-brand-400 hover:bg-zinc-800 transition-colors cursor-pointer">{block.scope}</button>
                       </div>
                       <div className="bg-zinc-900/30 p-6 rounded-xl border border-zinc-800/50 hover:bg-zinc-900/50 transition-colors duration-300">
                           <p className="text-zinc-300 leading-8 text-lg">{block.coreView}</p>
@@ -429,7 +712,7 @@ const ResultView: React.FC<ResultViewProps> = ({ data, isTranscriptGenerating, o
                               <span>{c.provesPoint}</span>
                            </div>
                            {c.source && (
-                                <button onClick={() => handleTimeClick(c.source.split('-')[0].trim())} className="flex items-center gap-2 text-xs font-mono text-zinc-500 hover:text-pink-400 transition-colors mt-2">
+                                <button onClick={() => handleTimeStringClick(c.source)} className="flex items-center gap-2 text-xs font-mono text-zinc-500 hover:text-pink-400 transition-colors mt-2">
                                     <PlayCircleIcon className="w-3.5 h-3.5" />
                                     {c.source}
                                 </button>
