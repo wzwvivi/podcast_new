@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { HistoryItem } from '../types';
-import { MessageSquareIcon, SparklesIcon, XIcon } from './Icons';
+import { MessageSquareIcon, SparklesIcon, XIcon, LogInIcon } from './Icons';
 import PodcasterManager from './PodcasterManager';
 
 interface SidebarProps {
@@ -12,6 +12,9 @@ interface SidebarProps {
   onEpisodeSelect: (url: string) => void;
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
+  isAuthenticated: boolean;
+  username?: string;
+  onLogin: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -22,7 +25,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNew,
   onEpisodeSelect,
   isOpen,
-  setIsOpen
+  setIsOpen,
+  isAuthenticated,
+  username,
+  onLogin
 }) => {
   const [activeTab, setActiveTab] = useState<'history' | 'podcasters'>('history');
 
@@ -97,14 +103,31 @@ const Sidebar: React.FC<SidebarProps> = ({
           {activeTab === 'history' ? (
             /* History List */
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {history.length === 0 && (
+              {!isAuthenticated ? (
+                /* 未登录提示 */
+                <div className="text-center mt-10 px-4">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-zinc-800/50 flex items-center justify-center">
+                    <LogInIcon className="w-8 h-8 text-zinc-600" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-300 mb-2">Login to Save History</p>
+                  <p className="text-xs text-zinc-600 mb-6">
+                    Your analysis history will be saved for easy access
+                  </p>
+                  <button
+                    onClick={onLogin}
+                    className="px-4 py-2 bg-brand-900/30 border border-brand-700/50 text-brand-300 text-sm font-medium rounded-lg transition-all duration-200 hover:bg-brand-900/40 hover:border-brand-600/50 w-full uppercase tracking-wider"
+                  >
+                    Login / Sign Up
+                  </button>
+                </div>
+              ) : history.length === 0 ? (
                 <div className="text-center mt-10 px-4">
                   <p className="text-sm text-gray-500">No history found</p>
                   <p className="text-xs text-zinc-600 mt-1">Your analyzed podcasts will appear here.</p>
                 </div>
-              )}
+              ) : null}
 
-              {history.map((item) => (
+              {isAuthenticated && history.map((item) => (
                 <div 
                   key={item.id}
                   onClick={() => {
@@ -120,7 +143,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{item.title}</p>
                     <p className="text-[10px] text-zinc-600 truncate">
-                      {new Date(item.date).toLocaleDateString()} • {item.result.overview?.type || 'Podcast'}
+                      {new Date(item.date).toLocaleDateString()} • {item.type || item.result?.overview?.type || 'Podcast'}
                     </p>
                   </div>
                   
@@ -141,22 +164,54 @@ const Sidebar: React.FC<SidebarProps> = ({
           ) : (
             /* Podcaster Manager */
             <div className="flex-1 overflow-hidden">
-              <PodcasterManager onEpisodeSelect={onEpisodeSelect} />
+              {!isAuthenticated ? (
+                /* 未登录提示 */
+                <div className="text-center mt-10 px-4">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-zinc-800/50 flex items-center justify-center">
+                    <LogInIcon className="w-8 h-8 text-zinc-600" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-300 mb-2">Login to Manage Podcasters</p>
+                  <p className="text-xs text-zinc-600 mb-6">
+                    Subscribe to your favorite podcasters and get the latest episodes
+                  </p>
+                  <button
+                    onClick={onLogin}
+                    className="px-4 py-2 bg-brand-900/30 border border-brand-700/50 text-brand-300 text-sm font-medium rounded-lg transition-all duration-200 hover:bg-brand-900/40 hover:border-brand-600/50 w-full uppercase tracking-wider"
+                  >
+                    Login / Sign Up
+                  </button>
+                </div>
+              ) : (
+                <PodcasterManager onEpisodeSelect={onEpisodeSelect} />
+              )}
             </div>
           )}
         </div>
 
         {/* User / Footer */}
         <div className="p-4 border-t border-dark-border">
-          <div className="flex items-center gap-3 px-2">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-600 to-purple-600 flex items-center justify-center text-xs font-bold text-white">
-              AI
+          {isAuthenticated ? (
+            <div className="flex items-center gap-3 px-2">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-600 to-purple-600 flex items-center justify-center text-xs font-bold text-white">
+                {username?.charAt(0).toUpperCase() || 'U'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-200 truncate">{username}</p>
+                <p className="text-xs text-gray-500">Logged In</p>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-200">Podcast Insight</p>
-              <p className="text-xs text-gray-500">Pro Plan</p>
-            </div>
-          </div>
+          ) : (
+            <button
+              onClick={onLogin}
+              className="w-full flex items-center gap-3 px-3 py-2.5 bg-brand-900/30 border border-brand-700/50 text-brand-300 rounded-lg transition-all duration-200 hover:bg-brand-900/40 hover:border-brand-600/50"
+            >
+              <LogInIcon className="w-5 h-5 text-brand-400" />
+              <div className="flex-1 text-left">
+                <p className="text-sm font-medium">Guest Mode</p>
+                <p className="text-xs text-brand-400/70">Login to Save Data</p>
+              </div>
+            </button>
+          )}
         </div>
       </aside>
     </>
