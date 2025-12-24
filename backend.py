@@ -53,7 +53,9 @@ app.add_middleware(
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY environment variable is required")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or "AIzaSyDyOK54_HvO_BiVbrENy_K3zu95IqLPUhQ"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY environment variable is required")
 
 # 配置Gemini
 genai.configure(api_key=GEMINI_API_KEY)
